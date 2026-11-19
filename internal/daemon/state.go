@@ -12,6 +12,8 @@ import (
 
 var subscriberBuffer = 4096
 
+const unclaimedLifetime = 30 * time.Second
+
 type member struct {
 	pid        int
 	running    bool
@@ -27,6 +29,9 @@ type reaped struct {
 
 // State is the member table. All methods are safe for concurrent use.
 type State struct {
+	// OnExit runs after a member exit is recorded, with the lock held. The init process starts
+	// the exit cleanup from it.
+	OnExit      func(id string)
 	mu          sync.Mutex
 	seq         uint64
 	members     map[string]*member
@@ -58,7 +63,10 @@ func (s *State) Started(id string, pid int, at time.Time) {
 	s.emit(protocol.Event{Type: "start", ID: id, PID: pid, Time: stamp(at)})
 	if r, ok := s.unclaimed[pid]; ok {
 		delete(s.unclaimed, pid)
-		s.exit(id, r.status, r.at)
+		// A pid is reused after some time; an old exit of another process must not end the member.
+		if at.Sub(r.at) < unclaimedLifetime {
+			s.exit(id, r.status, r.at)
+		}
 	}
 }
 
@@ -85,6 +93,9 @@ func (s *State) exit(id string, status int, at time.Time) {
 	delete(s.byPID, m.pid)
 	m.running, m.exitCode, m.finishedAt = false, status, at
 	s.emit(protocol.Event{Type: "exit", ID: id, PID: m.pid, Code: status, Time: stamp(at)})
+	if s.OnExit != nil {
+		s.OnExit(id)
+	}
 }
 
 func (s *State) emit(e protocol.Event) {

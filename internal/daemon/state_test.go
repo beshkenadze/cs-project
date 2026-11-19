@@ -94,3 +94,26 @@ func TestSlowSubscriberStreamEnds(t *testing.T) {
 		t.Fatal("the stream did not end after an event was not delivered")
 	}
 }
+
+func TestOldUnclaimedExitDoesNotEndMember(t *testing.T) {
+	s := NewState()
+	s.Reaped(40, 1, t0)
+	s.Started("e", 40, t0.Add(time.Minute))
+	snap, _ := s.Subscribe()
+	if !snap.Members[0].Running {
+		t.Fatal("an exit of a reused pid ended the member")
+	}
+}
+
+func TestOnExitRunsForEachExit(t *testing.T) {
+	s := NewState()
+	var ended []string
+	s.OnExit = func(id string) { ended = append(ended, id) }
+	s.Reaped(50, 0, t0)
+	s.Started("early", 50, t0)
+	s.Started("late", 51, t0)
+	s.Reaped(51, 0, t0)
+	if len(ended) != 2 || ended[0] != "early" || ended[1] != "late" {
+		t.Fatalf("ended %v", ended)
+	}
+}
