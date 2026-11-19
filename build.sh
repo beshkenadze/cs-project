@@ -36,12 +36,13 @@ sha=$(shasum -a 256 "$archive" | cut -d ' ' -f1)
 pkg="$out/swift"
 rm -rf "$pkg"
 cp -R packaging/swift "$pkg"
+cp "$archive" "$pkg/Sources/CCSProjectImage/cs-project-image.tar.gz"
 {
-    xxd -i -n cs_project_image_data "$archive" \
-        | sed -E 's/^unsigned char /static const unsigned char /; s/^unsigned int /static const unsigned int /'
-    printf '\n#include "CCSProjectImage.h"\n'
+    printf '#include "CCSProjectImage.h"\n\n'
+    printf '#pragma clang diagnostic ignored "-Wc23-extensions"\n'
+    printf 'static const unsigned char cs_project_image_data[] = {\n#embed "cs-project-image.tar.gz"\n};\n\n'
     printf 'const unsigned char *cs_project_image_bytes(void) { return cs_project_image_data; }\n'
-    printf 'unsigned int cs_project_image_len(void) { return cs_project_image_data_len; }\n'
+    printf 'unsigned int cs_project_image_len(void) { return sizeof cs_project_image_data; }\n'
     printf 'const char *cs_project_image_sha256(void) { return "%s"; }\n' "$sha"
     printf 'const char *cs_project_image_reference(void) { return "%s"; }\n' "$reference"
 } > "$pkg/Sources/CCSProjectImage/embedded_image.c"
