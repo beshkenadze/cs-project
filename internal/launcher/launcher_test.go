@@ -27,6 +27,8 @@ type fakeSystem struct {
 	cgroup   string
 	runcPID  int
 	detached [][]string
+	// membersMemoryMax: the last memory.max of the members/ cgroup.
+	membersMemoryMax uint64
 }
 
 func newFake(t *testing.T) *fakeSystem {
@@ -82,6 +84,11 @@ func (f *fakeSystem) JoinCgroup(leaf string) error {
 }
 
 func (f *fakeSystem) Report(id string, pid int) error { return nil }
+
+func (f *fakeSystem) SetMembersMemoryMax(bytes uint64) error {
+	f.membersMemoryMax = bytes
+	return nil
+}
 
 func tarLayer(t *testing.T, files map[string]string) []byte {
 	var buf bytes.Buffer
@@ -328,18 +335,38 @@ func TestStartWaitsForTheMemberLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Set after the test holds the lock: it reports the next caller that waits for it.
+	arrived := make(chan struct{})
+	e.l.lockWaiting = func(id string) { close(arrived) }
 	done := make(chan error, 1)
 	go func() {
 		_, err := e.l.Start("m1")
 		done <- err
 	}()
 	select {
+	case <-arrived:
 	case err := <-done:
-		t.Fatalf("start ran while the cleanup held the member lock: %v", err)
-	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("start ended without the member lock: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("start did not wait for the member lock")
+	}
+	if len(e.sys.mounts) != 0 || len(e.sys.detached) != 0 {
+		t.Fatal("start worked while the cleanup held the member lock")
 	}
 	unlock()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The members/ cgroup gets the VM memory minus the reserve of the launcher, so a member without
+// a limit cannot take the memory of the launcher.
+func TestBootLimitsTheMembersCgroup(t *testing.T) {
+	e := setup(t)
+	if err := e.l.Boot(protocol.Boot{MembersMemoryMax: 3840 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	if e.sys.membersMemoryMax != 3840<<20 {
+		t.Fatalf("members memory.max %d", e.sys.membersMemoryMax)
 	}
 }

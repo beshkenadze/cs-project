@@ -89,6 +89,10 @@ func (s LinuxSystem) DeleteNetNS(path string) error {
 
 func (LinuxSystem) JoinCgroup(leaf string) error { return cgroups.Join(leaf, os.Getpid()) }
 
+func (LinuxSystem) SetMembersMemoryMax(bytes uint64) error {
+	return cgroups.SetMemoryMax("members", bytes)
+}
+
 // Report tells the init process the pid of a member.
 func (LinuxSystem) Report(id string, pid int) error {
 	conn, err := net.Dial("unix", protocol.ControlSock)

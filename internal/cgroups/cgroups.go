@@ -29,6 +29,11 @@ func Join(leaf string, pid int) error {
 	return write(filepath.Join(Root, leaf, "cgroup.procs"), strconv.Itoa(pid))
 }
 
+// SetMemoryMax writes memory.max of the cgroup leaf under Root.
+func SetMemoryMax(leaf string, bytes uint64) error {
+	return write(filepath.Join(Root, leaf, "memory.max"), strconv.FormatUint(bytes, 10))
+}
+
 // MemberPath is the OCI cgroupsPath of a member.
 func MemberPath(id string) string { return "/members/" + id }
 

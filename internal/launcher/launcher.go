@@ -31,6 +31,8 @@ type System interface {
 	DeleteNetNS(path string) error
 	JoinCgroup(leaf string) error
 	Report(id string, pid int) error
+	// SetMembersMemoryMax writes memory.max of the members/ cgroup.
+	SetMembersMemoryMax(bytes uint64) error
 }
 
 // Launcher works on the directories of one project VM.
@@ -40,6 +42,8 @@ type Launcher struct {
 	Host         string // the host share: blobs and logs
 	State        string // tmpfs: runc state, network namespaces, locks
 	ResolvSource string // /etc/resolv.conf of the VM
+	// lockWaiting, when set, runs before a caller waits for a member lock. Tests use it.
+	lockWaiting func(id string)
 }
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
@@ -364,6 +368,9 @@ func (l *Launcher) lockMember(id string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	if l.lockWaiting != nil {
+		l.lockWaiting(id)
+	}
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
 		f.Close()
 		return nil, err
@@ -392,6 +399,11 @@ func (l *Launcher) Remove(r protocol.Remove) error {
 
 // Boot deletes the guest state that the project no longer has: members, volumes and layers.
 func (l *Launcher) Boot(b protocol.Boot) error {
+	if b.MembersMemoryMax > 0 {
+		if err := l.Sys.SetMembersMemoryMax(b.MembersMemoryMax); err != nil {
+			return fmt.Errorf("limit the members cgroup: %w", err)
+		}
+	}
 	keep := map[string]bool{}
 	for _, id := range b.Keep {
 		keep[id] = true

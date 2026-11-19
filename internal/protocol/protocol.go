@@ -55,6 +55,9 @@ type Member struct {
 type Boot struct {
 	Keep    []string `json:"keep"`
 	Volumes []string `json:"volumes"`
+	// MembersMemoryMax is memory.max of the members/ cgroup: the VM memory minus the reserve
+	// of the launcher. Zero leaves it unset.
+	MembersMemoryMax uint64 `json:"membersMemoryMax"`
 }
 
 // Remove is the input of `remove`.
