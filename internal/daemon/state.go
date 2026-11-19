@@ -20,6 +20,10 @@ type member struct {
 	exitCode   int
 	startedAt  time.Time
 	finishedAt time.Time
+	// cleaning: the process exited and its cleanup runs. The member still shows as running.
+	cleaning bool
+	status   int
+	exitedAt time.Time
 }
 
 type reaped struct {
@@ -29,9 +33,9 @@ type reaped struct {
 
 // State is the member table. All methods are safe for concurrent use.
 type State struct {
-	// OnExit runs after a member exit is recorded, with the lock held. The init process starts
-	// the exit cleanup from it.
-	OnExit      func(id string)
+	// OnExit runs when the process of a member exits, with the lock held. The init process
+	// starts the exit cleanup from it and returns true; the exit is then published at Cleaned.
+	OnExit      func(id string) bool
 	mu          sync.Mutex
 	seq         uint64
 	members     map[string]*member
@@ -91,10 +95,24 @@ func (s *State) Reaped(pid, status int, at time.Time) {
 func (s *State) exit(id string, status int, at time.Time) {
 	m := s.members[id]
 	delete(s.byPID, m.pid)
-	m.running, m.exitCode, m.finishedAt = false, status, at
+	if s.OnExit != nil && s.OnExit(id) {
+		m.cleaning, m.status, m.exitedAt = true, status, at
+		return
+	}
+	s.finish(id, m, status, at)
+}
+
+func (s *State) finish(id string, m *member, status int, at time.Time) {
+	m.running, m.cleaning, m.exitCode, m.finishedAt = false, false, status, at
 	s.emit(protocol.Event{Type: "exit", ID: id, PID: m.pid, Code: status, Time: stamp(at)})
-	if s.OnExit != nil {
-		s.OnExit(id)
+}
+
+// Cleaned publishes the exit of a member whose cleanup ended.
+func (s *State) Cleaned(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if m, ok := s.members[id]; ok && m.cleaning {
+		s.finish(id, m, m.status, m.exitedAt)
 	}
 }
 
@@ -151,7 +169,7 @@ func (s *State) RunningPIDs() []int {
 	defer s.mu.Unlock()
 	var out []int
 	for _, m := range s.members {
-		if m.running {
+		if m.running && !m.cleaning {
 			out = append(out, m.pid)
 		}
 	}

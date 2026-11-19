@@ -237,6 +237,12 @@ func (l *Launcher) Start(id string) (pid int, err error) {
 	if err := checkName("member ID", id); err != nil {
 		return 0, err
 	}
+	// The exit cleanup of an earlier run takes the same lock.
+	unlock, err := l.lockMember(id)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	m, err := l.readSpec(id)
 	if err != nil {
 		return 0, err
@@ -247,7 +253,7 @@ func (l *Launcher) Start(id string) (pid int, err error) {
 	l.Sys.DeleteNetNS(l.netnsPath(id))
 	defer func() {
 		if err != nil {
-			l.Cleanup(id)
+			l.cleanup(id)
 		}
 	}()
 	if err := l.Sys.MountOverlay(l.lowerDirs(rootfs.ChainIDs(m.DiffIDs)), filepath.Join(dir, "upper"), filepath.Join(dir, "work"), rootDir); err != nil {
@@ -333,6 +339,11 @@ func (l *Launcher) Cleanup(id string) error {
 		return err
 	}
 	defer unlock()
+	return l.cleanup(id)
+}
+
+// cleanup is Cleanup for a caller that holds the member lock.
+func (l *Launcher) cleanup(id string) error {
 	l.Sys.Run(ocispec.Runtimes["runc"], []string{"--root", l.runcRoot(), "delete", "--force", id}, nil, nil)
 	if m, err := l.readSpec(id); err == nil {
 		for i := len(m.Networks) - 1; i >= 0; i-- {

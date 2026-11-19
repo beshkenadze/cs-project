@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/beshkenadze/cs-project/internal/protocol"
 	"github.com/beshkenadze/cs-project/internal/rootfs"
@@ -317,4 +318,28 @@ func ranArg(runs [][]string, arg string) bool {
 		}
 	}
 	return false
+}
+
+// Start takes the member lock, as the exit cleanup does, so the two never overlap.
+func TestStartWaitsForTheMemberLock(t *testing.T) {
+	e := setup(t)
+	e.l.Create(e.spec)
+	unlock, err := e.l.lockMember("m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.l.Start("m1")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("start ran while the cleanup held the member lock: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }

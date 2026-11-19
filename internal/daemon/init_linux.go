@@ -21,10 +21,11 @@ const (
 	stopGrace       = 3 * time.Second
 )
 
-// helpers are the exit-cleanup processes that the init process starts. The reaper skips them.
+// helpers are the exit-cleanup processes that the init process starts, by pid, with the member
+// that each one cleans.
 type helpers struct {
 	mu   sync.Mutex
-	pids map[int]bool
+	pids map[int]string
 }
 
 // RunInit is the init process of the VM container.
@@ -44,9 +45,9 @@ func RunInit() error {
 	signals := make(chan os.Signal, 64)
 	signal.Notify(signals, unix.SIGCHLD, unix.SIGTERM, unix.SIGINT)
 
-	h := &helpers{pids: map[int]bool{}}
+	h := &helpers{pids: map[int]string{}}
 	state := NewState()
-	state.OnExit = func(id string) { h.startCleanup(id) }
+	state.OnExit = h.startCleanup
 
 	ln, err := net.Listen("unix", protocol.ControlSock)
 	if err != nil {
@@ -69,19 +70,23 @@ func RunInit() error {
 	return nil
 }
 
-func (h *helpers) startCleanup(id string) {
+// startCleanup starts the exit cleanup of a member. False: no cleanup runs, so the exit is
+// published at once.
+func (h *helpers) startCleanup(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out, err := os.OpenFile(filepath.Join(protocol.StateDir, "cleanup-"+id+".txt"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return
+		return false
 	}
 	defer out.Close()
 	cmd := exec.Command("/proc/self/exe", "cleanup", id)
 	cmd.Stdout, cmd.Stderr = out, out
-	if cmd.Start() == nil {
-		h.pids[cmd.Process.Pid] = true
+	if cmd.Start() != nil {
+		return false
 	}
+	h.pids[cmd.Process.Pid] = id
+	return true
 }
 
 func reap(state *State, h *helpers) {
@@ -92,10 +97,11 @@ func reap(state *State, h *helpers) {
 			return
 		}
 		h.mu.Lock()
-		helper := h.pids[pid]
+		cleaned, helper := h.pids[pid]
 		delete(h.pids, pid)
 		h.mu.Unlock()
 		if helper {
+			state.Cleaned(cleaned)
 			continue
 		}
 		code := ws.ExitStatus()

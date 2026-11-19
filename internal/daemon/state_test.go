@@ -108,12 +108,42 @@ func TestOldUnclaimedExitDoesNotEndMember(t *testing.T) {
 func TestOnExitRunsForEachExit(t *testing.T) {
 	s := NewState()
 	var ended []string
-	s.OnExit = func(id string) { ended = append(ended, id) }
+	s.OnExit = func(id string) bool { ended = append(ended, id); return false }
 	s.Reaped(50, 0, t0)
 	s.Started("early", 50, t0)
 	s.Started("late", 51, t0)
 	s.Reaped(51, 0, t0)
 	if len(ended) != 2 || ended[0] != "early" || ended[1] != "late" {
 		t.Fatalf("ended %v", ended)
+	}
+}
+
+// The exit is published only after the exit cleanup: a restart that follows the exit event
+// cannot meet the runc state or the networks of the old run.
+func TestExitIsPublishedAfterTheCleanup(t *testing.T) {
+	s := NewState()
+	s.OnExit = func(string) bool { return true }
+	_, ch := s.Subscribe()
+	s.Started("a", 10, t0)
+	<-ch
+	s.Reaped(10, 3, t0)
+	select {
+	case e := <-ch:
+		t.Fatalf("event before the cleanup ended: %+v", e)
+	default:
+	}
+	if snap, _ := s.Subscribe(); !snap.Members[0].Running {
+		t.Fatal("the snapshot shows the member exited before its cleanup ended")
+	}
+	if len(s.RunningPIDs()) != 0 {
+		t.Fatal("a member in its cleanup has no live process")
+	}
+	s.Cleaned("a")
+	e := <-ch
+	if e.Type != "exit" || e.ID != "a" || e.Code != 3 {
+		t.Fatalf("exit %+v", e)
+	}
+	if snap, _ := s.Subscribe(); snap.Members[0].Running || snap.Members[0].ExitCode != 3 {
+		t.Fatalf("snapshot after the cleanup %+v", snap.Members[0])
 	}
 }
