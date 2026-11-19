@@ -72,14 +72,20 @@ func Apply(root string, r io.Reader) error {
 		}
 	}
 	// Directory times change while children are written, so they are set last, deepest first.
+	// The name is resolved again: a later entry can have replaced a parent by a symbolic link.
 	for i := len(a.dirs) - 1; i >= 0; i-- {
-		setTimes(a.dirs[i].path, a.dirs[i].header)
+		d, b := path.Split(a.dirs[i].name)
+		parent, err := a.resolveDir(d)
+		if err != nil {
+			continue
+		}
+		setTimes(filepath.Join(parent, b), a.dirs[i].header)
 	}
 	return nil
 }
 
 type dirTime struct {
-	path   string
+	name   string
 	header *tar.Header
 }
 
@@ -118,7 +124,11 @@ func (a *applier) entry(h *tar.Header, r io.Reader) error {
 		return a.opaque(parent, strings.TrimSuffix(dirName, "/"))
 	}
 	if strings.HasPrefix(base, whiteoutPrefix) {
-		return os.RemoveAll(filepath.Join(parent, strings.TrimPrefix(base, whiteoutPrefix)))
+		hidden := strings.TrimPrefix(base, whiteoutPrefix)
+		if hidden == "" || hidden == "." || hidden == ".." || strings.Contains(hidden, "/") {
+			return errors.New("invalid whiteout")
+		}
+		return os.RemoveAll(filepath.Join(parent, hidden))
 	}
 	target := filepath.Join(parent, base)
 	a.written[name] = true
@@ -199,7 +209,7 @@ func (a *applier) entry(h *tar.Header, r io.Reader) error {
 		}
 	}
 	if h.Typeflag == tar.TypeDir {
-		a.dirs = append(a.dirs, dirTime{target, h})
+		a.dirs = append(a.dirs, dirTime{name, h})
 	} else {
 		setTimes(target, h)
 	}

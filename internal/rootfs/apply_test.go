@@ -189,6 +189,19 @@ func TestRefusesPathOutsideRoot(t *testing.T) {
 	}
 }
 
+func TestRefusesWhiteoutOfDotNames(t *testing.T) {
+	for _, name := range []string{"x/.wh..", "x/.wh...", "x/.wh."} {
+		dir := t.TempDir()
+		applyAll(t, dir, layer(t, false, entry{name: "x/", typ: tar.TypeDir}, entry{name: "x/keep", typ: tar.TypeReg, body: "k"}))
+		if err := Apply(dir, bytes.NewReader(layer(t, false, entry{name: name, typ: tar.TypeReg}))); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+		if !exists(filepath.Join(dir, "x/keep")) {
+			t.Fatalf("%s removed the directory", name)
+		}
+	}
+}
+
 func TestRefusesZstd(t *testing.T) {
 	err := Apply(t.TempDir(), bytes.NewReader([]byte{0x28, 0xb5, 0x2f, 0xfd, 0, 0, 0, 0}))
 	if err == nil {
