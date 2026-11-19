@@ -53,6 +53,9 @@ func TestExprsMasquerade(t *testing.T) {
 func recorder(t *testing.T, batches *[][]byte, types *[]int) *nftables.Conn {
 	t.Helper()
 	c, err := nftables.New(nftables.WithTestDial(func(req []netlink.Message) ([]netlink.Message, error) {
+		if len(req) == 0 {
+			return nil, nil // a receive with nothing buffered
+		}
 		var batch []byte
 		for _, m := range req {
 			b, err := m.MarshalBinary()
