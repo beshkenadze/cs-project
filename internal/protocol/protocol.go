@@ -7,9 +7,9 @@ const Version = 1
 
 // Paths in the VM container.
 const (
-	StateDir   = "/run/cs-project/state" // tmpfs: control socket, runc state, network namespaces
-	HostDir    = "/run/cs-project/host"  // virtiofs share of the project directory on the host
-	DataDir    = "/data"                 // the data volume
+	StateDir    = "/run/cs-project/state" // tmpfs: control socket, runc state, network namespaces
+	HostDir     = "/run/cs-project/host"  // virtiofs share of the project directory on the host
+	DataDir     = "/data"                 // the data volume
 	ControlSock = StateDir + "/ctl.sock"
 )
 
@@ -44,6 +44,7 @@ type Member struct {
 	Mounts     []Mount   `json:"mounts"`
 	Networks   []Network `json:"networks"`
 	MemoryMax  int64     `json:"memoryMax"`
+	Hosts      string    `json:"hosts"` // first content of /etc/hosts; `hosts` rewrites it
 	CapAdd     []string  `json:"capAdd,omitempty"`
 	CapDrop    []string  `json:"capDrop,omitempty"`
 	OCIRuntime string    `json:"ociRuntime"`
