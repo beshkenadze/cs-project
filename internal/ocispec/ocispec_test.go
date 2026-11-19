@@ -152,3 +152,16 @@ func hasPrefix(list []string, p string) bool {
 	}
 	return false
 }
+
+// A member without a memory limit shares the VM memory: it gets no memory.max.
+func TestNoLimitWritesNoMemoryMax(t *testing.T) {
+	m := member()
+	m.MemoryMax = 0
+	spec, err := Build(m, Paths{Rootfs: rootfs(t), Hosts: "/m/hosts", Resolv: "/m/resolv.conf", Hostname: "/m/hostname", NetNS: "/ns/abc", Volumes: "/data/volumes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Linux.Resources.Memory != nil {
+		t.Fatalf("memory %+v", spec.Linux.Resources.Memory)
+	}
+}
