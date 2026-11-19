@@ -208,3 +208,41 @@ func TestRefusesZstd(t *testing.T) {
 		t.Fatal("accepted a zstd layer")
 	}
 }
+
+// A whiteout hides only parent-layer entries: the entries of its own layer stay (OCI image-spec,
+// layer.md, Whiteouts).
+func TestOpaqueKeepsOwnEntriesInsideADirectoryThisLayerWrote(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "a/", typ: tar.TypeDir}, entry{name: "a/b/", typ: tar.TypeDir}, entry{name: "a/b/old", typ: tar.TypeReg, body: "old"}),
+		layer(t, false, entry{name: "a/b/", typ: tar.TypeDir}, entry{name: "a/b/new", typ: tar.TypeReg, body: "new"}, entry{name: "a/.wh..wh..opq", typ: tar.TypeReg}),
+	)
+	if exists(filepath.Join(dir, "a/b/old")) {
+		t.Fatal("a/b/old of the parent layer survived the opaque marker of a")
+	}
+	if read(t, filepath.Join(dir, "a/b/new")) != "new" {
+		t.Fatal("a/b/new of the same layer was removed")
+	}
+}
+
+func TestWhiteoutKeepsTheEntryOfItsOwnLayer(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "foo", typ: tar.TypeReg, body: "parent"}),
+		layer(t, false, entry{name: "foo", typ: tar.TypeReg, body: "own"}, entry{name: ".wh.foo", typ: tar.TypeReg}),
+	)
+	if !exists(filepath.Join(dir, "foo")) || read(t, filepath.Join(dir, "foo")) != "own" {
+		t.Fatal("the whiteout removed the entry of its own layer")
+	}
+}
+
+func TestWhiteoutOfADirectoryThisLayerWroteRemovesOnlyParentChildren(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "d/", typ: tar.TypeDir}, entry{name: "d/old", typ: tar.TypeReg, body: "old"}),
+		layer(t, false, entry{name: "d/", typ: tar.TypeDir}, entry{name: "d/new", typ: tar.TypeReg, body: "new"}, entry{name: ".wh.d", typ: tar.TypeReg}),
+	)
+	if exists(filepath.Join(dir, "d/old")) || !exists(filepath.Join(dir, "d/new")) {
+		t.Fatal("wrong content of d after the whiteout")
+	}
+}

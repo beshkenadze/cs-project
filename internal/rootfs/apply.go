@@ -121,17 +121,17 @@ func (a *applier) entry(h *tar.Header, r io.Reader) error {
 		return err
 	}
 	if base == opaqueMarker {
-		return a.opaque(parent, strings.TrimSuffix(dirName, "/"))
+		return a.opaque(parent)
 	}
 	if strings.HasPrefix(base, whiteoutPrefix) {
 		hidden := strings.TrimPrefix(base, whiteoutPrefix)
 		if hidden == "" || hidden == "." || hidden == ".." || strings.Contains(hidden, "/") {
 			return errors.New("invalid whiteout")
 		}
-		return os.RemoveAll(filepath.Join(parent, hidden))
+		return a.removeParentEntries(filepath.Join(parent, hidden))
 	}
 	target := filepath.Join(parent, base)
-	a.written[name] = true
+	a.written[target] = true
 
 	if h.Typeflag == tar.TypeDir {
 		if st, err := os.Lstat(target); err == nil && !st.IsDir() {
@@ -216,9 +216,8 @@ func (a *applier) entry(h *tar.Header, r io.Reader) error {
 	return nil
 }
 
-// opaque removes the entries of dir that come from the parents. Entries that this layer wrote
-// before the marker stay.
-func (a *applier) opaque(dir, name string) error {
+// opaque removes the entries of dir that come from the parent layers.
+func (a *applier) opaque(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -227,17 +226,25 @@ func (a *applier) opaque(dir, name string) error {
 		return err
 	}
 	for _, e := range entries {
-		rel := e.Name()
-		if name != "" {
-			rel = name + "/" + e.Name()
-		}
-		if !a.written[rel] {
-			if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
-				return err
-			}
+		if err := a.removeParentEntries(filepath.Join(dir, e.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// removeParentEntries removes what the parent layers have at target. A whiteout applies to the
+// parent layers only: an entry that this layer wrote stays, and in a directory that this layer
+// wrote only the parent entries go.
+func (a *applier) removeParentEntries(target string) error {
+	if !a.written[target] {
+		return os.RemoveAll(target)
+	}
+	st, err := os.Lstat(target)
+	if err != nil || !st.IsDir() {
+		return nil
+	}
+	return a.opaque(target)
 }
 
 // resolveDir gives the host path of a directory of the layer. A symbolic link in it is followed
