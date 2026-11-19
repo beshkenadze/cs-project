@@ -1,0 +1,29 @@
+name: cs-project
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  launcher:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Vet for linux/arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+        run: go vet ./...
+      - name: Check publication recovery and failure handling
+        run: scripts/tests/publish-tests.sh
+      - name: Test, check runc and CNI SHA-256, build image and Swift package
+        run: ./build.sh
+      - name: Check Swift package
+        run: scripts/tests/package-tests.sh
