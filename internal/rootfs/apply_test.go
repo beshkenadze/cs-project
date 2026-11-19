@@ -246,3 +246,38 @@ func TestWhiteoutOfADirectoryThisLayerWroteRemovesOnlyParentChildren(t *testing.
 		t.Fatal("wrong content of d after the whiteout")
 	}
 }
+
+// The layer writes a/b/new with no header for a/b: the directory b is still an entry of the
+// layer through its child.
+func TestOpaqueAfterAChildWithoutItsDirectoryHeader(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "a/", typ: tar.TypeDir}, entry{name: "a/b/", typ: tar.TypeDir}, entry{name: "a/b/old", typ: tar.TypeReg, body: "old"}),
+		layer(t, false, entry{name: "a/b/new", typ: tar.TypeReg, body: "new"}, entry{name: "a/.wh..wh..opq", typ: tar.TypeReg}),
+	)
+	if exists(filepath.Join(dir, "a/b/old")) || !exists(filepath.Join(dir, "a/b/new")) {
+		t.Fatal("wrong content of a/b")
+	}
+}
+
+func TestOpaqueBeforeAChildWithoutItsDirectoryHeader(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "a/", typ: tar.TypeDir}, entry{name: "a/b/", typ: tar.TypeDir}, entry{name: "a/b/old", typ: tar.TypeReg, body: "old"}),
+		layer(t, false, entry{name: "a/.wh..wh..opq", typ: tar.TypeReg}, entry{name: "a/b/new", typ: tar.TypeReg, body: "new"}),
+	)
+	if exists(filepath.Join(dir, "a/b/old")) || !exists(filepath.Join(dir, "a/b/new")) {
+		t.Fatal("wrong content of a/b")
+	}
+}
+
+func TestWhiteoutOfADirectoryWithAChildWithoutItsHeader(t *testing.T) {
+	dir := t.TempDir()
+	applyAll(t, dir,
+		layer(t, false, entry{name: "a/", typ: tar.TypeDir}, entry{name: "a/b/", typ: tar.TypeDir}, entry{name: "a/b/old", typ: tar.TypeReg, body: "old"}),
+		layer(t, false, entry{name: "a/b/new", typ: tar.TypeReg, body: "new"}, entry{name: "a/.wh.b", typ: tar.TypeReg}),
+	)
+	if exists(filepath.Join(dir, "a/b/old")) || !exists(filepath.Join(dir, "a/b/new")) {
+		t.Fatal("wrong content of a/b")
+	}
+}

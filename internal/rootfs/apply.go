@@ -57,7 +57,7 @@ func Apply(root string, r io.Reader) error {
 	case bytes.Equal(magic, []byte{0x28, 0xb5, 0x2f, 0xfd}):
 		return errors.New("zstd layers are not supported")
 	}
-	a := applier{root: root, written: map[string]bool{}}
+	a := applier{root: root, written: map[string]bool{}, holds: map[string]bool{}}
 	tr := tar.NewReader(src)
 	for {
 		h, err := tr.Next()
@@ -92,7 +92,9 @@ type dirTime struct {
 type applier struct {
 	root    string
 	written map[string]bool
-	dirs    []dirTime
+	// holds: directories that have an entry of this layer below them.
+	holds map[string]bool
+	dirs  []dirTime
 }
 
 func cleanName(name string) (string, error) {
@@ -132,6 +134,10 @@ func (a *applier) entry(h *tar.Header, r io.Reader) error {
 	}
 	target := filepath.Join(parent, base)
 	a.written[target] = true
+	// The directories above an entry hold it, also when the layer has no header for them.
+	for d := filepath.Dir(target); d != a.root && strings.HasPrefix(d, a.root+string(filepath.Separator)); d = filepath.Dir(d) {
+		a.holds[d] = true
+	}
 
 	if h.Typeflag == tar.TypeDir {
 		if st, err := os.Lstat(target); err == nil && !st.IsDir() {
@@ -237,7 +243,7 @@ func (a *applier) opaque(dir string) error {
 // parent layers only: an entry that this layer wrote stays, and in a directory that this layer
 // wrote only the parent entries go.
 func (a *applier) removeParentEntries(target string) error {
-	if !a.written[target] {
+	if !a.written[target] && !a.holds[target] {
 		return os.RemoveAll(target)
 	}
 	st, err := os.Lstat(target)
