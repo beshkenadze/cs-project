@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/beshkenadze/cs-project/internal/cgroups"
 	"github.com/beshkenadze/cs-project/internal/protocol"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"golang.org/x/sys/unix"
 )
 
 // Runtimes maps the ociRuntime of a member to its binary. This is the only place that chooses an
@@ -143,14 +145,22 @@ type entry struct {
 	members []string
 }
 
-func readDB(path string, group bool) []entry {
-	f, err := os.Open(path)
+// readDB reads etc/passwd or etc/group of the rootfs. A symbolic link at etc or at the file is
+// refused: it could point out of the rootfs into the launcher's file system.
+func readDB(rootfs, name string, group bool) []entry {
+	if st, err := os.Lstat(filepath.Join(rootfs, "etc")); err != nil || !st.IsDir() {
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(rootfs, "etc", name), os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
 	var out []entry
-	s := bufio.NewScanner(f)
+	s := bufio.NewScanner(io.LimitReader(f, 1<<20))
 	for s.Scan() {
 		parts := strings.Split(s.Text(), ":")
 		if len(parts) < 4 || strings.HasPrefix(parts[0], "#") {
@@ -180,8 +190,8 @@ func ResolveUser(rootfs, user string) (uid, gid uint32, groups []uint32, err err
 		return 0, 0, nil, nil
 	}
 	userPart, groupPart, hasGroup := strings.Cut(user, ":")
-	passwd := readDB(filepath.Join(rootfs, "etc/passwd"), false)
-	groupDB := readDB(filepath.Join(rootfs, "etc/group"), true)
+	passwd := readDB(rootfs, "passwd", false)
+	groupDB := readDB(rootfs, "group", true)
 	name := ""
 	if n, perr := strconv.ParseUint(userPart, 10, 32); perr == nil {
 		uid = uint32(n)

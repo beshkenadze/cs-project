@@ -47,6 +47,21 @@ func TestResolveUser(t *testing.T) {
 	}
 }
 
+func TestResolveUserRefusesSymlinkedPasswd(t *testing.T) {
+	outside := rootfs(t)
+	root := t.TempDir()
+	os.Symlink(filepath.Join(outside, "etc"), filepath.Join(root, "etc"))
+	if _, _, _, err := ResolveUser(root, "redis"); err == nil {
+		t.Fatal("followed a symbolic link out of the rootfs")
+	}
+	root = t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+	os.Symlink(filepath.Join(outside, "etc/passwd"), filepath.Join(root, "etc/passwd"))
+	if _, _, _, err := ResolveUser(root, "redis"); err == nil {
+		t.Fatal("followed a symbolic link at etc/passwd")
+	}
+}
+
 func member() protocol.Member {
 	return protocol.Member{
 		ID: "abc", Hostname: "a1", Args: []string{"httpd", "-f"}, Env: []string{"A=1"}, Cwd: "/srv",
